@@ -1,0 +1,10 @@
+# number of classes
+nc: 16
+
+# class names
+names: ["road-traffic-sign_@_road-traffic-sign", "car_@_car", "bus_@_bus", "truck_@_truck", "tricycle_@_tricycle", "pedestrian_@_pedestrian", "motocycle_@_motocycle", "bicycle_@_bicycle", "cone_@_cone", "car-traffic-light_@_car-traffic-light", "rider_@_rider", "safety-crash-barrels_@_safety-crash-barrels", "bicycle-traffic-light_@_bicycle-traffic-light", "pedestrian-traffic-light_@_pedestrian-traffic-light", "plastic-traffic-barrier_@_plastic-traffic-barrier", "cement-traffic-barrier_@_cement-traffic-barrier"]
+
+#train and val datasets (image directory or *.txt file with image paths)
+train: ../../datasets/NM_obj_det_old_tag/train/images/
+test: ../../datasets/NM_obj_det_old_tag/test/images/
+val: ../../datasets/NM_obj_det_old_tag/test/images/

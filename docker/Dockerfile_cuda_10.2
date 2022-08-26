@@ -1,0 +1,27 @@
+FROM nvcr.io/nvidia/pytorch:19.11-py3
+
+USER root
+ENV DEBIAN_FRONTEND noninteractive
+RUN sed -i s@/archive.ubuntu.com/@/mirrors.aliyun.com/@g /etc/apt/sources.list
+RUN apt-get clean && apt-get update && apt-get install -y zip htop screen libgl1-mesa-glx net-tools lrzsz
+
+RUN pip uninstall torch torchtext torchvision --y	
+COPY pip.conf /etc/pip.conf
+RUN pip install seaborn thop torch torchvision torchaudio
+
+COPY mish-cuda mish-cuda
+COPY pytorch_wavelets pytorch_wavelets
+
+RUN cd mish-cuda && python setup.py build install --record mish-install.log
+RUN cd pytorch_wavelets && pip install .
+
+WORKDIR /home
+
+ENV PATH="/home/.local/bin:${PATH}"
+
+#USER root
+RUN mkdir /logs && chmod -R 777 /logs
+
+# Set a fixed model cache directory.
+ENV FVCORE_CACHE="/tmp"
+
