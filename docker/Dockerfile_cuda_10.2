@@ -9,8 +9,8 @@ RUN pip uninstall torch torchtext torchvision --y
 COPY pip.conf /etc/pip.conf
 RUN pip install seaborn thop torch torchvision torchaudio
 
-COPY mish-cuda mish-cuda
-COPY pytorch_wavelets pytorch_wavelets
+RUN git clone https://github.com/JunnYu/mish-cuda
+RUN git clone https://github.com/fbcotter/pytorch_wavelets
 
 RUN cd mish-cuda && python setup.py build install --record mish-install.log
 RUN cd pytorch_wavelets && pip install .
