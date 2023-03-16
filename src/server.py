@@ -3,6 +3,7 @@ import argparse
 import flask
 import base64
 import re
+import requests
 from flask import Flask, request
 from flask_cors import CORS
 
@@ -20,10 +21,10 @@ from utils.general import (check_img_size, non_max_suppression,
                            scale_coords, obtain_image_from_url)
 from utils.torch_utils import select_device, time_synchronized
 from utils.metrics import calculate_iou
+from evaluation import *
 
 
 MAX_IMAGES_PER_BATCH = 100
-SUPER_CATEGORY_SEP = u"_@_"
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 
@@ -64,7 +65,7 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
 CORS(app, resources=r'/*')
 @app.route('/hello', methods=['GET'])
 def greeting():
-    return json.dumps({u"code":u"OK", u"message":u"", u"data":[u"hi, nice to meet you !"]})
+    return json.dumps({u"code":u"OK", u"message":u"", u"data":[u"hi, service is running !"]})
 
 
 def parse_request_params(request_data):
@@ -74,7 +75,7 @@ def parse_request_params(request_data):
         response_str = json.dumps({u"code":u"ERROR", u"message":u"json decode error", u"data":[]})
         return response_str
     
-    if u"datas" not in request or u"params" not in request \
+    if u"datas" not in request \
         or not isinstance(request[u"datas"], (list, tuple)):
         response_str = json.dumps({u"code":u"ERROR", u"message":u"invalid parameters", u"data":[]})
         return response_str
@@ -85,18 +86,18 @@ def parse_request_params(request_data):
      
     param_info = []   
     for record in request[u"datas"]:
-        if u"image_id" not in record \
-            or u"img_url" not in record or not record[u"img_url"].strip().startswith(u"http"):
+        if u"id" not in record \
+            or u"url" not in record or not record[u"url"].strip().startswith(u"http"):
             response_str = json.dumps({u"code":u"ERROR", u"message":u"invalid parameters", u"data":[]})
             return response_str
         
-        image = obtain_image_from_url(record[u"img_url"].strip())
+        image = obtain_image_from_url(record[u"url"].strip())
         if image is None:
             response_str = json.dumps({u"code":u"ERROR", u"message":u"image unavailable", u"data":[]})
             return response_str
         
         rec = {u"height":image.shape[0], u"width":image.shape[1], 
-                      u"image_id":record[u"image_id"].strip(), u"image":image}
+                      u"image_id":record[u"id"], u"image":image}
         if u"region" in record:
             rec[u"region"] = record[u"region"]
         
@@ -106,7 +107,7 @@ def parse_request_params(request_data):
 
 
 CORS(app, resources=r'/*')
-@app.route('/basic_predict', methods=['POST'])
+@app.route('/image/recognition', methods=['POST'])
 def basic_predict():
     request_data = flask.request.get_data()
     param_info = parse_request_params(request_data)
@@ -119,7 +120,7 @@ def basic_predict():
         img = letterbox(org_img, new_shape=opt.img_size, auto_size=64)[0]#resize and padding
     
         # Convert
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416（在1280模式下，为[3, 768, 1280]）
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB
         img = np.ascontiguousarray(img)
     
         #type convert and normalize
@@ -146,104 +147,62 @@ def basic_predict():
                 
                 for *xyxy, conf, cls in reversed(det):
                     xyxy_list = [e.item() for e in xyxy]
-                    cn_items = names[int(cls)].split(SUPER_CATEGORY_SEP)
-                    rec_res.append({"clsid": int(cls)+1, 
-                                    "class": names[int(cls)].split(SUPER_CATEGORY_SEP)[0], 
-                                    "super_class": re.sub(u"其他障碍物", u"other-barrier", cn_items[1] if len(cn_items)==2 else u""), 
-                                    "score": float(conf.item()), 
+                    rec_res.append({
+                                    "label": names[int(cls)], 
+                                    "confidence": float(conf.item()), 
+                                    
                                     "left": max(0., xyxy_list[0]/record[u"width"]), 
                                     "right": min(1., xyxy_list[2]/record[u"width"]), 
                                     "top": max(0., xyxy_list[1]/record[u"height"]), 
                                     "bottom": min(1., xyxy_list[3]/record[u"height"]),
+                                    
                                     "leftTopX":xyxy_list[0],
                                     "leftTopY":xyxy_list[1],
                                     "rightBottomX":xyxy_list[2],
                                     "rightBottomY":xyxy_list[3]
                                     })
                 
-        det_res.append({u"det_res":rec_res, u"image_id":record[u"image_id"]})
+        det_res.append({u"objects":rec_res, u"id":record[u"image_id"], u"code":u"OK", u"message":u""})
     return json.dumps({u"code":u"OK", u"message":u"", u"data":det_res})
 
 
 CORS(app, resources=r'/*')
-@app.route('/region_predict', methods=['POST'])
-def region_predict():
-    request_data = flask.request.get_data()
-    param_info = parse_request_params(request_data)
-    if isinstance(param_info, str):
-        return param_info
+@app.route('/image/resultEvaluate', methods=['POST'])
+def basic_cal_map():
+    #cal mAP given urls for gt.json and pred.json
+    try:
+        request = json.loads(flask.request.get_data().decode('utf-8'))
+    except ValueError as err:
+        response_str = json.dumps({u"code":u"ERROR", u"message":u"json decode error", u"data":[]})
+        return response_str
     
-    det_res = []
-    for record in param_info:
-        org_img = record[u"image"]
-        img_region = record[u"region"]
-        img = letterbox(org_img, new_shape=opt.img_size, auto_size=64)[0]#resize and padding
+    if u"groundTruthResultFileUrl" not in request \
+        or u"modelRunResultFileUrl" not in request:
+        response_str = json.dumps({u"code":u"ERROR", u"message":u"invalid parameters", u"data":[]})
+        return response_str
     
-        # Convert
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416（在1280模式下，为[3, 768, 1280]）
-        img = np.ascontiguousarray(img)
-    
-        #type convert and normalize
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
-    
-        # Inference
-        pred = model(img, augment=False)[0]
-        # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=None, agnostic=False)
-    
-        print (u"file :", record[u"image_id"], u" image shape :", org_img.shape)
-        rec_res = []
-    
-        # Process detections
-        for i, det in enumerate(pred):  # detections per image
-    
-            if len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], org_img.shape).round()
-                
-                for *xyxy, conf, cls in reversed(det):
-                    xyxy_list = [e.item() for e in xyxy]
-                    cn_items = names[int(cls)].split(SUPER_CATEGORY_SEP)
-                    rec_res.append({"clsid": int(cls)+1, 
-                                    "class": names[int(cls)].split(SUPER_CATEGORY_SEP)[0], 
-                                    "super_class": re.sub(u"其他障碍物", u"other-barrier", cn_items[1] if len(cn_items)==2 else u""),
-                                    "score": float(conf.item()), 
-                                    "left": max(0., xyxy_list[0]/record[u"width"]), 
-                                    "right": min(1., xyxy_list[2]/record[u"width"]), 
-                                    "top": max(0., xyxy_list[1]/record[u"height"]), 
-                                    "bottom": min(1., xyxy_list[3]/record[u"height"]),
-                                    "leftTopX":xyxy_list[0],
-                                    "leftTopY":xyxy_list[1],
-                                    "rightBottomX":xyxy_list[2],
-                                    "rightBottomY":xyxy_list[3]
-                                    })
-            
-        max_iou = 0
-        max_iou_id = -1    
-        for idx, d in enumerate(rec_res):
-            iou = calculate_iou(d[u"leftTopX"], d[u"leftTopY"], 
-                                d[u"rightBottomX"], d[u"rightBottomY"], 
-                                img_region[u"leftTopX"], img_region[u"leftTopY"], 
-                                img_region[u"rightBottomX"], img_region[u"rightBottomY"])
-            if max_iou < iou:
-                max_iou = iou
-                max_iou_id = idx
-            
-        salient_obj = rec_res[max_iou_id]
-        salient_obj[u"keypointX"] = max(min((salient_obj[u"leftTopX"]+salient_obj[u"rightBottomX"])/2, 
-                                            img_region[u"rightBottomX"]), 
-                                        img_region[u"leftTopX"])
-        salient_obj[u"keypointY"] = max(min((salient_obj[u"leftTopY"]+salient_obj[u"rightBottomY"])/2, 
-                                            img_region[u"rightBottomY"]), 
-                                        img_region[u"leftTopY"])
-                
-        det_res.append({u"det_res":[salient_obj], u"image_id":record[u"image_id"]})
-    return json.dumps({u"code":u"OK", u"message":u"", u"data":det_res})
+    gt_url = request[u"groundTruthResultFileUrl"]
+    pred_url = request[u"modelRunResultFileUrl"]
 
+    gt_res = requests.get(gt_url)
+    open(u"./gt.json", u"wb").write(gt_res.content)
+    pred_res = requests.get(pred_url)
+    open(u"./pred.json", u"wb").write(pred_res.content)
+
+    with codecs.open(u"./gt.json", u"rb", u"utf-8") as f:
+        gt_lines = f.readlines()
+    file_ids, gt_counter_per_class = load_gt(gt_lines)
+    gt_classes = list(gt_counter_per_class.keys())
+    gt_classes = sorted(gt_classes)
+    n_classes = len(gt_classes)
+    with codecs.open(r"./pred.json", u"rb", u"utf-8") as f:
+        pred_lines = [json.loads(line.strip()) for line in f]
+    load_pred(gt_classes, pred_lines)
+    
+    mAP = cal_mAP(n_classes, gt_classes, gt_counter_per_class)
+    
+    return json.dumps({"code":"OK", "message":"", "data":{"metrics":[{"name":"MAP","value":str(mAP),"description":"mean average precision"}]}})
+    
 
 if __name__ == u"__main__":
     parser = argparse.ArgumentParser()
