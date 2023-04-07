@@ -201,7 +201,7 @@ def basic_cal_map():
     
     mAP = cal_mAP(n_classes, gt_classes, gt_counter_per_class)
     
-    return json.dumps({"code":"OK", "message":"", "data":{"metrics":[{"name":"MAP","value":str(mAP),"description":"mean average precision"}]}})
+    return json.dumps({"code":"OK", "message":"", "data":{"metrics":[{"name":"mAP","value":str(mAP),"description":"mean average precision"}]}})
     
 
 if __name__ == u"__main__":
