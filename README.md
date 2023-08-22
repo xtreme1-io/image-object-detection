@@ -15,7 +15,7 @@ cd /app
 wget https://basicai-asset.s3.us-west-2.amazonaws.com/xtreme1/model/coco80.pth
 
 cd src
-python -u server.py --device=0 --weights=../coco80.pt --conf-thres=0.5 --port=5000
+python -u server.py --device=0 --weights=../coco80.pth --conf-thres=0.5 --port=5000
 
 # Test
 python client_demo.py
